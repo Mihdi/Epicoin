@@ -2,6 +2,7 @@
 using System.IO;
 using System.Collections.Generic;
 using System.Net;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Threading.Tasks;
 using System.Text;
@@ -16,19 +17,25 @@ namespace Epicoin
 		private static string knownParentsFile = "ressources/baby_known_parents.prnt";
 		public static RNGCryptoServiceProvider rngCsp = new RNGCryptoServiceProvider();
 
-		private Parent self;
+		private static int MaxNumberOfShoulders = 5; //small number to start with
+		private static int ShoulderMaxWaitTime = 5; //in seconds
+		private readonly string cryingRequest;
 
-		private HashSet<Friend> friends;
-		private Queue<PotentialParent> shoulders;
+		private static int IPFormat = 4; //IPv6 is better but the odds of finding people using IPv4 are greaters
 
-		private int RSAPrivateKey;
-		private int[] RSAPublicKey;
+		private readonly Parent self;
+
+		private readonly HashSet<Friend> friends;
+		private readonly Queue<PotentialParent> shoulders;
+
+		private readonly int RSAPrivateKey;
+		private readonly int[] RSAPublicKey;
 
 		public Baby(Parent parent)
 		{
 			//fields init routines
 			this.self = parent;
-			parent.self = this;
+			parent.Self = this;
 			this.friends = new HashSet<Friend>();
 			this.shoulders = new Queue<PotentialParent>();
 
@@ -41,8 +48,7 @@ namespace Epicoin
 				string ip;
 				while ((ip = sr.ReadLine()) != null)
 				{
-					int kbr;
-					if (Int32.TryParse(sr.ReadLine(), out kbr))
+					if (Int32.TryParse(sr.ReadLine(), out int kbr))
 					{
 						this.friends.Add(new Friend(ip, kbr));
 					}
@@ -59,19 +65,26 @@ namespace Epicoin
 				Call(f);
 			}
 
+			//Generate the crying request
+			this.cryingRequest = null;
+
 			//If has no parents and no friends, cry
+			if(friends.Count == 0)
+			{
+				Cry();
+			}
 		}
 
 		//first-connection related methods
 		private async void Call(Friend friend)
 		{
 
-			Task<ClientWebSocket> tryingToMakeAFriend = friend.answerCall();
-			ClientWebSocket newFriend = await tryingToMakeAFriend;
-			if (newFriend != null)
+			Task<ClientWebSocket> tryingToMakeAFriend = friend.AnswerCall();
+			ClientWebSocket friendlySocket = await tryingToMakeAFriend;
+			if (friendlySocket != null)
 			{
 				//Ohana means family. Family means nobody gets left behind or forgotten
-				this.self.family.Add(newFriend);
+				this.self.Family.Add(friend, friendlySocket);
 			}
 			else
 			{
@@ -79,12 +92,53 @@ namespace Epicoin
 				this.friends.Remove(friend);
 			}
 		}
+		private static string GenerateRandomIp()
+		{
+			string output = "";
+
+			Byte[] rndByte = new byte[Baby.IPFormat];
+			Baby.rngCsp.GetBytes(rndByte);
+
+			
+			foreach(byte b in rndByte)
+			{
+				output += b.ToString();
+			}
+
+			return output;
+		}
 
 		private void Cry()
 		{
-			throw new NotImplementedException();
-		}
+			//“We need never be ashamed of our tears.” - Dickens
+			if(this.shoulders.Count == Baby.MaxNumberOfShoulders)
+			{
+				PotentialParent firstShoulder = this.shoulders.Peek();
 
+				if (((int)(DateTime.UtcNow - firstShoulder.CryingDate).TotalSeconds) > Baby.ShoulderMaxWaitTime){
+					this.shoulders.Dequeue();
+				}
+
+				Cry();
+			}
+			else
+			{
+				string hostIp;
+				PotentialParent daddy;
+
+				do
+				{
+
+					hostIp = Baby.GenerateRandomIp();
+					daddy = new PotentialParent(hostIp, NetworkActor.Port);
+
+				} while (this.shoulders.Contains(daddy));
+
+				daddy.SendTo(this.cryingRequest);
+			}
+			
+		}
+		
 		//data downloading methods
 		private void Leech(/*data to be leeched*/)
 		{
@@ -101,7 +155,7 @@ namespace Epicoin
 	static class RSA
 	{
 		//RSA keys' generation related method
-		private static bool isPrime(int n)
+		private static bool IsPrime(int n)
 		{
 			if (n < 2)
 				return false;
@@ -115,7 +169,8 @@ namespace Epicoin
 			}
 			return true;
 		}
-		private static int gcd(int n, int m)
+
+		private static int GCD(int n, int m)
 		{
 			if (n == 0 || m == 0)
 				return 0;
@@ -125,18 +180,20 @@ namespace Epicoin
 
 			if (n > m)
 			{
-				return gcd(n - m, m);
+				return GCD(n - m, m);
 			}
 			else
 			{
-				return gcd(n, m - n);
+				return GCD(n, m - n);
 			}
 		}
-		private static bool areCoprime(int n, int m)
+
+		private static bool AreCoprime(int n, int m)
 		{
-			return gcd(n, m) == 1;
+			return GCD(n, m) == 1;
 		}
-		private static int sign(int n)
+
+		private static int Sign(int n)
 		{
 			if (n > 0)
 				return 1;
@@ -146,24 +203,25 @@ namespace Epicoin
 
 			return (-1);
 		}
-		private static int quot(int n, int m)
+
+		private static int Quot(int n, int m)
 		{
-			if (sign(m) == 1)
+			if (Sign(m) == 1)
 				return n / m;
 
-			return n / m - sign(m);
+			return n / m - Sign(m);
 		}
 
-		private static int modulo(int n, int m)
+		private static int Modulo(int n, int m)
 		{
 			//assuming m is positive, but that should be enough for RSA
-			if (sign(n) == 1)
+			if (Sign(n) == 1)
 				return n % m;
 
-			return (n % m) + ((sign(m) == 1) ? (m) : (-m));
+			return (n % m) + ((Sign(m) == 1) ? (m) : (-m));
 		}
 
-		private static int[] bezout(int n, int m)
+		private static int[] Bezout(int n, int m)
 		{
 			if (m == 0)
 			{
@@ -171,16 +229,17 @@ namespace Epicoin
 			}
 			else
 			{
-				int[] foo = bezout(m, (modulo(n, m)));
-				return new int[] { foo[1], (foo[0] - foo[1] * (quot(n, m))), foo[2] };
+				int[] foo = Bezout(m, (Modulo(n, m)));
+				return new int[] { foo[1], (foo[0] - foo[1] * (Quot(n, m))), foo[2] };
 			}
 		}
 
-		private static int modMultInv(int a, int n)
+		private static int ModMultInv(int a, int n)
 		{
-			int[] foo = bezout(a, n);
-			return modulo(foo[0], n);
+			int[] foo = Bezout(a, n);
+			return Modulo(foo[0], n);
 		}
+
 		/* 
 			AtkinSieve is the quickest known way to compute prime numbers I know of, 
 			so it could be nice to implement it as a bonus.
@@ -190,6 +249,7 @@ namespace Epicoin
 		{
 			throw new NotImplementedException();
 		}
+
 		private static List<int> EratosthenesSieve(int n)
 		{
 			if (n < 2)
@@ -216,7 +276,8 @@ namespace Epicoin
 
 			return output;
 		}
-		private static int generateRandomNumber()
+
+		private static int GenerateRandomNumber()
 		{
 			int output = 0;
 
@@ -230,7 +291,8 @@ namespace Epicoin
 
 			return output;
 		}
-		private static int generateRandomNumber(int min, int max)
+
+		private static int GenerateRandomNumber(int min, int max)
 		{
 			max--;
 			int output = 0;
@@ -245,15 +307,16 @@ namespace Epicoin
 
 			return (output - max + min);
 		}
+
 		public static void GenerateRSAKeys(out int privateKey, out int[] publicKey)
 		{
-			List<int> primes = EratosthenesSieve(generateRandomNumber());
+			List<int> primes = EratosthenesSieve(GenerateRandomNumber());
 
 			int p = primes[primes.Count - 1];
 
 			primes.RemoveAt(primes.Count - 1);
 
-			int q = primes[generateRandomNumber(primes.Count / 2, primes.Count)];
+			int q = primes[GenerateRandomNumber(primes.Count / 2, primes.Count)];
 
 			int n = p * q;
 
@@ -262,16 +325,16 @@ namespace Epicoin
 			int e;
 			do
 			{
-				e = generateRandomNumber(0, eulerIndice);
-			} while (!(areCoprime(e, eulerIndice)));
+				e = GenerateRandomNumber(0, eulerIndice);
+			} while (!(AreCoprime(e, eulerIndice)));
 
-			int d = modMultInv(e, eulerIndice);
+			int d = ModMultInv(e, eulerIndice);
 
 			privateKey = d;
 			publicKey = new int[] { n, e };
 		}
 	}
-	struct Friend
+	class Friend
 	{
 		public string IPAddress { get; set; }
 		public int KBRAddress { get; set; }
@@ -283,10 +346,10 @@ namespace Epicoin
 		}
 
 
-		public async Task<ClientWebSocket> answerCall()
+		public async Task<ClientWebSocket> AnswerCall()
 		{
 
-			byte[] buffer = new byte[64]; //this may be useful if we decide to read the returned message
+			byte[] buffer = new byte[64]; //this may be useful if we decide to read the returned message in a further version
 
 			ClientWebSocket output = new ClientWebSocket();
 
@@ -311,22 +374,21 @@ namespace Epicoin
 
 	struct PotentialParent
 	{
-		public IPEndPoint endPoint { get; }
-		public DateTime cryingDate { get; }
-		//public Socket server { get; }
+		public IPEndPoint EndPoint { get; }
+		public DateTime CryingDate { get; }
+		public Socket Server { get; }
 
 		public PotentialParent(string hostName, int port)
 		{
-			this.endPoint = new IPEndPoint(IPAddress.Parse(hostName), port); //check if valid code
-			this.cryingDate = DateTime.UtcNow;
-			//this.server = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+			this.EndPoint = new IPEndPoint(IPAddress.Parse(hostName), port); //check if valid code
+			this.CryingDate = DateTime.UtcNow;
+			this.Server = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
 		}
 
 		public int SendTo(string msg)
 		{
 			byte[] data = Encoding.ASCII.GetBytes(msg);
-			throw new NotImplementedException();
-			//return this.server.SendTo(data, data.Length, SocketFlags.None, this.endPoint);
+			return this.Server.SendTo(data, data.Length, SocketFlags.None, this.EndPoint);
 		}
 	}
 }

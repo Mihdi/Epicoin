@@ -16,7 +16,7 @@ namespace Epicoin
 
 		//usage of fixed port for now
 		protected static int Port = 27945; //not in use according to https://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers
-
+		
 		public NetworkActor()
 		{
 			string localIP;

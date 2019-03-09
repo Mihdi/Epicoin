@@ -12,10 +12,10 @@ namespace Epicoin
      */
 	class Parent
 	{
-		public Baby self { get; set; }
+		public Baby Self { get; set; }
 		//private List<Baby> babies; Is this really useful? We already have them in the Baby class
-		public List<ClientWebSocket> family { get; set; }
-		private Socket childCareGiver;
+		public Dictionary<Friend,ClientWebSocket> Family { get; set; }
+		private readonly Socket childCareGiver;
 
 		public Parent()
 		{
