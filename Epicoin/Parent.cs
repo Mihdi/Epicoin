@@ -14,7 +14,7 @@ namespace Epicoin
     {
         public Baby self { get; set; }
         //private List<Baby> babies; Is this really useful? We already have them in the Baby class
-        private List<WebSocket> family;
+        public List<ClientWebSocket> family{get; set;}
         private Socket childCareGiver;
 
         public Parent()
